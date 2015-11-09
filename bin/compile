@@ -1,0 +1,76 @@
+#!/bin/sh
+
+exec 3<&1
+exec 4<&2
+
+env_dir=$3
+build_dir=$1
+cache_dir="$2/$STACK"
+
+if [ -r "$env_dir/debug" ]
+then
+  set -x
+  debug=$(cat "$env_dir/debug")
+else
+  exec 1>/dev/null
+  exec 2>/dev/null
+fi
+if [ -r "$env_dir/gm_url" ]
+then gm_url=$(cat "$env_dir/gm_url")
+else gm_url=ftp://ftp.graphicsmagick.org/pub/GraphicsMagick/1.3/GraphicsMagick-1.3.19.tar.bz2
+fi
+gm_name=$(basename "$gm_url" .tar.bz2)
+gm_file=$(basename "$gm_url")
+gm_prefix=/app/vendor
+
+stdout () {
+  echo "	+ $@" >&3
+}
+
+stderr () {
+  echo "	+ $@" >&4
+}
+
+command () {
+  if [ "$debug" != true ]
+  then stdout " \$ $@"; fi
+  "$@"
+}
+
+if [ ! -e "$cache_dir/$gm_file" ]
+then
+    stdout "fetch $gm_url"
+    command wget --progress=dot:binary -O"/tmp/$gm_file" "$gm_url"
+
+    stdout "compile $gm_name"
+    tar -C /tmp -jxf "/tmp/$gm_file"
+    cd "/tmp/$gm_name" && {
+      command ./configure --enable-static=no --enable-shared=yes --prefix="$gm_prefix/graphicsmagick"
+    }
+
+    cd "/tmp/$gm_name" && {
+      mkdir -p "$gm_prefix/graphicsmagick"
+      if ! command make
+      then exit 1; fi
+    }
+
+    command "install $gm_name [cache]"
+    cd "/tmp/$gm_name" && {
+      command make install
+
+      mkdir -p "$cache_dir"
+      cd "$gm_prefix" && {
+        command tar -cjf "$cache_dir/$gm_file" graphicsmagick
+      }
+    }
+fi
+
+stdout "install $gm_name"
+mkdir -p "$build_dir/vendor"
+mkdir -p "$build_dir/.profile.d"
+
+cat <<EOF >"$build_dir/.profile.d/graphicsmagick.sh"
+export PATH="\$PATH:$gm_prefix/graphicsmagick/bin"
+EOF
+
+command tar -C "$build_dir/vendor" -xjf "$cache_dir/$gm_file"
